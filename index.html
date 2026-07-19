@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RiddleSolver</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa0a8;
+    --accent: #6ea8fe;
+    --high: #4caf50;
+    --medium: #f4b400;
+    --low: #e05252;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  .container { width: 100%; max-width: 640px; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  p.subtitle { color: var(--muted); margin-top: 0; margin-bottom: 24px; }
+
+  .settings-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .settings-row label {
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  select, input[type="text"] {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+  #apiHost { flex: 1; min-width: 200px; }
+
+  textarea {
+    width: 100%;
+    min-height: 90px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 1rem;
+    resize: vertical;
+  }
+  textarea:focus, select:focus, input:focus { outline: 2px solid var(--accent); }
+
+  button {
+    margin-top: 12px;
+    background: var(--accent);
+    color: #0f1115;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+
+  .card {
+    margin-top: 24px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: none;
+  }
+  .card.visible { display: block; }
+
+  .answer-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .answer { font-size: 1.3rem; font-weight: 700; }
+  .badge {
+    font-size: 0.75rem;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .badge.high { background: rgba(76,175,80,0.15); color: var(--high); }
+  .badge.medium { background: rgba(244,180,0,0.15); color: var(--medium); }
+  .badge.low { background: rgba(224,82,82,0.15); color: var(--low); }
+
+  .category { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+
+  h3.section { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin: 18px 0 8px; }
+  ol, ul { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 4px; line-height: 1.4; }
+
+  .hint-list li { list-style: none; margin-bottom: 10px; padding-left: 0; }
+  .hint-list .hint-num { color: var(--accent); font-weight: 700; margin-right: 6px; }
+
+  .notes { margin-top: 16px; font-size: 0.85rem; color: var(--muted); font-style: italic; }
+  .error { color: var(--low); margin-top: 16px; display: none; }
+  .error.visible { display: block; }
+  .loading { color: var(--muted); margin-top: 16px; display: none; }
+  .loading.visible { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🧩 RiddleSolver</h1>
+  <p class="subtitle">Single-turn riddle solving, powered by a local Ollama model.</p>
+
+  <div class="settings-row">
+    <label style="flex:1;">
+      API host
+      <input type="text" id="apiHost" value="http://localhost:8000" />
+    </label>
+    <label>
+      Mode
+      <select id="mode">
+        <option value="answer_with_explanation" selected>Answer + explanation</option>
+        <option value="answer_only">Answer only</option>
+        <option value="guided_hint">Guided hints (no answer)</option>
+      </select>
+    </label>
+  </div>
+
+  <textarea id="riddleInput" placeholder="Type or paste a riddle here...">What gets wetter as it dries?</textarea>
+  <br />
+  <button id="solveBtn" onclick="solveRiddle()">Solve Riddle</button>
+
+  <div class="loading" id="loading">Thinking...</div>
+  <div class="error" id="error"></div>
+
+  <div class="card" id="resultCard"></div>
+</div>
+
+<script>
+async function solveRiddle() {
+  const riddle = document.getElementById('riddleInput').value.trim();
+  const mode = document.getElementById('mode').value;
+  const apiHost = document.getElementById('apiHost').value.trim().replace(/\/$/, '');
+  const btn = document.getElementById('solveBtn');
+  const loading = document.getElementById('loading');
+  const errorBox = document.getElementById('error');
+  const card = document.getElementById('resultCard');
+
+  errorBox.classList.remove('visible');
+  card.classList.remove('visible');
+  card.innerHTML = '';
+
+  if (!riddle) {
+    errorBox.textContent = 'Please enter a riddle first.';
+    errorBox.classList.add('visible');
+    return;
+  }
+
+  btn.disabled = true;
+  loading.classList.add('visible');
+
+  try {
+    const res = await fetch(`${apiHost}/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ riddle, mode }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`API returned ${res.status}: ${text}`);
+    }
+
+    const data = await res.json();
+    renderResult(data, mode);
+  } catch (err) {
+    errorBox.textContent = `Error: ${err.message}. Make sure the FastAPI backend is running and reachable at ${apiHost}.`;
+    errorBox.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('visible');
+  }
+}
+
+function renderResult(data, mode) {
+  const card = document.getElementById('resultCard');
+  card.classList.add('visible');
+
+  if (mode === 'guided_hint') {
+    const hintsHtml = (data.hints || [])
+      .map((h, i) => `<li><span class="hint-num">Hint ${i + 1}:</span>${escapeHtml(h)}</li>`)
+      .join('');
+    card.innerHTML = `
+      <div class="category">Category: ${escapeHtml(data.category || 'unknown')}</div>
+      <h3 class="section">Hints</h3>
+      <ul class="hint-list">${hintsHtml}</ul>
+      ${data.note ? `<div class="notes">${escapeHtml(data.note)}</div>` : ''}
+    `;
+    return;
+  }
+
+  const confidence = (data.confidence || 'Medium').toLowerCase();
+  const reasoningHtml = (data.reasoning || [])
+    .map(step => `<li>${escapeHtml(step)}</li>`)
+    .join('');
+  const alternatesHtml = (data.alternate_answers || [])
+    .map(alt => `<li><strong>${escapeHtml(alt.answer)}</strong>: ${escapeHtml(alt.justification)}</li>`)
+    .join('');
+
+  card.innerHTML = `
+    <div class="answer-row">
+      <span class="answer">${escapeHtml(data.answer || '(no answer)')}</span>
+      <span class="badge ${confidence}">${escapeHtml(data.confidence || 'Medium')}</span>
+    </div>
+    <div class="category">${escapeHtml(data.category || 'unknown')}${data.is_well_known ? ' · well-known riddle' : ''}</div>
+    ${reasoningHtml ? `<h3 class="section">Reasoning</h3><ol>${reasoningHtml}</ol>` : ''}
+    ${alternatesHtml ? `<h3 class="section">Alternate Answers</h3><ul>${alternatesHtml}</ul>` : ''}
+    ${data.notes ? `<div class="notes">${escapeHtml(data.notes)}</div>` : ''}
+  `;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Solve on Enter (Shift+Enter for newline)
+document.getElementById('riddleInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    solveRiddle();
+  }
+});
+</script>
+</body>
+</html>
